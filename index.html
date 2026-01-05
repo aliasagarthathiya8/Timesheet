@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timesheet Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f3f4f6;
+    }
+    h2 {
+      text-align: center;
+      color: #2d3748;
+    }
+    .form-container, .action-section {
+      max-width: 650px;
+      margin: auto;
+      background: #ffffff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      margin-bottom: 20px;
+    }
+    input, textarea, button, select {
+      display: block;
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 8px;
+      border: 1px solid #cbd5e0;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+    button {
+      background-color: #4299e1;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #2b6cb0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background-color: #fff;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+      border: 1px solid #e2e8f0;
+    }
+    th {
+      background-color: #2b6cb0;
+      color: white;
+      font-weight: bold;
+    }
+    tr:nth-child(even) td {
+      background-color: #f7fafc;
+    }
+    .table-container {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      background: white;
+    }
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    @media (max-width: 600px) {
+      input, textarea, button, select { font-size: 12px; }
+      th, td { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+<img id="logoImg" src="V2-logo.png" style="display:none" />
+<div class="form-container">
+  <h2>Timesheet Tracker</h2>
+  <form id="timesheet-form">
+    <input type="text" id="empId" placeholder="Employee ID" required pattern="[^\s]+">
+    <input type="text" id="empName" placeholder="Employee Name (Use _ instead of space)" required pattern="[^\s]+">
+    <textarea id="taskNote" placeholder="What are you working on?" required></textarea>
+    <button type="button" onclick="startWork()">Start Work</button>
+    <button type="button" onclick="endWork()">End Work</button>
+    <button type="button" onclick="loadFile()">Load File</button>
+    <button type="button" onclick="createFile()">Create File</button>
+  </form>
+</div>
+
+<div class="form-container">
+  <label for="dateRange">Select Date Range:</label>
+  <input id="dateRange" placeholder="Select date range" />
+</div>
+
+<div class="form-container table-container">
+  <table id="timesheet-table">
+    <thead>
+      <tr>
+        <th>Emp ID</th>
+        <th>Emp Name</th>
+        <th>Task Note</th>
+        <th>Start Time</th>
+        <th>End Time</th>
+        <th>Duration</th>
+        <th>Delete</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div class="action-section">
+  <div class="action-buttons">
+    <select id="exportFormat">
+      <option value="excel">Excel</option>
+      <option value="pdf">PDF</option>
+    </select>
+    <button onclick="exportData()">Export</button>
+    <button onclick="clearAll()" style="background-color: #e53e3e;">Clear All</button>
+  </div>
+</div>
+
+<script>
+let timesheetData = [];
+let fileHandle = null;
+let filteredData = [];
+const tableBody = document.querySelector('#timesheet-table tbody');
+
+flatpickr("#dateRange", {
+  mode: "range",
+  dateFormat: "Y-m-d",
+  onClose: filterByDateRange,
+  altInput: true,
+  allowInput: true,
+  monthSelectorType: "dropdown",
+  yearSelectorType: "dropdown"
+});
+
+
+
+function filterByDateRange(selectedDates) {
+  if (!selectedDates.length || selectedDates.length < 2 || !timesheetData.length) {
+    filteredData = [];
+    renderTable();
+    return;
+  }
+  const [start, end] = selectedDates;
+  // Set start time to 00:00:00 and end time to 23:59:59
+  const startDate = new Date(start);
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = new Date(end);
+  endDate.setHours(23, 59, 59, 999);
+
+  filteredData = timesheetData.filter(e => {
+    const entryDate = new Date(e.startTime);
+    return entryDate >= startDate && entryDate <= endDate;
+  });
+  renderTable(filteredData);
+}
+
+function renderTable(data = timesheetData) {
+  tableBody.innerHTML = '';
+  data.forEach((entry, index) => {
+    const row = tableBody.insertRow();
+    row.insertCell().textContent = entry.empId;
+    row.insertCell().textContent = entry.empName;
+    row.insertCell().textContent = entry.taskNote;
+    row.insertCell().textContent = entry.startTime;
+    row.insertCell().textContent = entry.endTime || 'In Progress';
+
+    // Calculate precise duration
+    let duration = '—';
+    if (entry.startTime && entry.endTime) {
+      const start = new Date(entry.startTime);
+      const end = new Date(entry.endTime);
+      const diffMs = end - start;
+
+      const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const diffSecs = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+      duration = `${diffHrs}h ${diffMins}m ${diffSecs}s`;
+    }
+    row.insertCell().textContent = duration;
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Delete';
+    delBtn.style.background = '#e53e3e';
+    delBtn.style.color = 'white';
+    delBtn.onclick = async () => {
+      const fullList = (filteredData.length ? filteredData : timesheetData);
+      const item = fullList[index];
+      timesheetData = timesheetData.filter(entry => entry !== item);
+      renderTable(filteredData.length ? filteredData = timesheetData.filter(e => {
+        const date = new Date(e.startTime);
+        return date >= flatpickr.parseDate(dateRange._flatpickr.selectedDates[0], "Y-m-d") &&
+               date <= flatpickr.parseDate(dateRange._flatpickr.selectedDates[1], "Y-m-d");
+      }) : timesheetData);
+      await autoSaveToFile();
+    };
+    row.insertCell().appendChild(delBtn);
+  });
+}
+
+
+function startWork() {
+  if (!fileHandle) {
+    alert("Please create or load a file first.");
+    return;
+  }
+  const empId = document.getElementById('empId').value.trim();
+  const empName = document.getElementById('empName').value.trim();
+  const taskNote = document.getElementById('taskNote').value.trim();
+  const now = new Date().toLocaleString();
+  if (!empId || !empName || !taskNote) {
+    alert('Please fill in all fields.');
+    return;
+  }
+  if (empName.includes(' ')) {
+    alert('Employee Name must not contain spaces. Use _ instead.');
+    return;
+  }
+  const existing = timesheetData.find(e => e.empId === empId && !e.endTime);
+  if (existing) {
+    alert('You have an unfinished task. End it before starting a new one.');
+    return;
+  }
+  timesheetData.push({ empId, empName, taskNote, startTime: now, endTime: '' });
+  renderTable();
+  autoSaveToFile();
+}
+
+function endWork() {
+  if (!fileHandle) {
+    alert("Please create or load a file first.");
+    return;
+  }
+  const empId = document.getElementById('empId').value.trim();
+  const taskNote = document.getElementById('taskNote').value.trim();
+  const now = new Date().toLocaleString();
+  const match = [...timesheetData].reverse().find(e => e.empId === empId && e.taskNote === taskNote && !e.endTime);
+  if (!match) {
+    alert('No matching ongoing task found.');
+    return;
+  }
+  match.endTime = now;
+  renderTable();
+  autoSaveToFile();
+}
+
+async function createFile() {
+  fileHandle = await window.showSaveFilePicker({
+    suggestedName: 'timesheet_data.json',
+    types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }]
+  });
+  await autoSaveToFile();
+  alert('File created. You can now begin logging tasks.');
+}
+
+async function loadFile() {
+  [fileHandle] = await window.showOpenFilePicker({
+    types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }]
+  });
+  const file = await fileHandle.getFile();
+  const content = await file.text();
+  timesheetData = JSON.parse(content);
+  renderTable();
+  if (timesheetData.length > 0) {
+      document.getElementById('empId').value = timesheetData[0].empId || '';
+      document.getElementById('empName').value = timesheetData[0].empName || '';
+    }
+}
+
+async function autoSaveToFile() {
+  if (!fileHandle) return;
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(timesheetData, null, 2));
+  await writable.close();
+}
+
+function exportData() {
+  const format = document.getElementById('exportFormat').value;
+  const data = (filteredData.length ? filteredData : timesheetData).map(row => {
+  let duration = '—';
+  if (row.startTime && row.endTime) {
+    const start = new Date(row.startTime);
+    const end = new Date(row.endTime);
+    const diffMs = end - start;
+    const h = Math.floor(diffMs / (1000 * 60 * 60));
+    const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const s = Math.floor((diffMs % (1000 * 60)) / 1000);
+    duration = `${h}h ${m}m ${s}s`;
+  }
+  return [row.empId, row.empName, row.taskNote, row.startTime, row.endTime || 'In Progress', duration];
+});
+
+  const headers = ['Emp ID', 'Emp Name', 'Task Note', 'Start Time', 'End Time','Duration'];
+  const empId = timesheetData[0]?.empId || '';
+  const empName = timesheetData[0]?.empName || '';
+  const filename = `V2Solutions_CS_SSTK_${empName}_Timesheet_${new Date().toLocaleDateString().replaceAll('/', '-')}`;
+
+  if (format === 'excel') {
+    const ws = XLSX.utils.aoa_to_sheet([['Emp ID:', empId], ['Emp Name:', empName], [], headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Timesheet");
+    XLSX.writeFile(wb, filename + ".xlsx");
+  } else {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(12);
+    doc.text(`Emp ID: ${empId}`, 10, 10);
+    doc.text(`Emp Name: ${empName}`, 10, 18);
+    doc.autoTable({
+      startY: 25,
+      head: [headers],
+      body: data
+    });
+    doc.save(filename + ".pdf");
+  }
+}
+</script>
+</body>
+</html>
